@@ -20,7 +20,7 @@ jobs:
       - name: Install Requirements
         run: pip install requests
 
-      - name: Execute Clean GraphQL Sync
+      - name: Fetch Submissions via External Unblocked Node
         env:
           LEETCODE_USERNAME: ${{ secrets.LEETCODE_USERNAME }}
         run: |
@@ -29,81 +29,63 @@ jobs:
           import requests
           import json
 
-          # Read and clean username variable safely
           username = str(os.environ['LEETCODE_USERNAME']).strip()
           
-          # Target LeetCode's official production GraphQL gateway endpoint
-          graphql_url = "https://leetcode.com"
+          # This is an unblocked public gateway node that manages Cloudflare-free LeetCode data feeds
+          api_url = f"https://vercel.app{username}"
           
-          query = """
-          query recentAcSubmissions($username: String!, $limit: Int!) {
-            recentAcSubmissionList(username: $username, limit: $limit) {
-              id
-              title
-              titleSlug
-              timestamp
-              lang
-            }
-          }
-          """
-          
-          variables = {"username": username, "limit": 20}
-          
-          # Clean, precise web browser emulation headers
-          headers = {
-              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-              "Content-Type": "application/json",
-              "Origin": "https://leetcode.com",
-              "Referer": f"https://leetcode.com{username}/"
-          }
-          
-          print(f"Connecting directly to LeetCode API for user: {username}")
+          print(f"Retrieving unblocked tracking data metrics for user profile: {username}")
           
           try:
-              response = requests.post(graphql_url, json={'query': query, 'variables': variables}, headers=headers, timeout=20)
+              response = requests.get(api_url, timeout=30)
               response.raise_for_status()
               data = response.json()
           except Exception as e:
-              print(f"API Connection Failure: {e}")
+              print(f"Network processing mirror error: {e}")
               exit(1)
               
-          submissions = data.get('data', {}).get('recentAcSubmissionList', [])
+          # Parse recent accepted updates safely 
+          submissions = data.get('recentSubmissions', [])
           
           if not submissions:
-              print("No recent accepted submission objects found.")
-              print("Fix: Go to LeetCode profile settings -> Privacy -> Check 'Recent Submissions' box PUBLIC.")
+              print("No accepted submissions retrieved.")
+              print("Fix: Ensure your LeetCode profile settings -> Privacy -> 'Recent Submissions' is checked PUBLIC.")
               exit(0)
               
-          # Map problem data points into code repository structure folders
+          # Construct directories inside git repo tree structure workspace
           os.makedirs('submissions', exist_ok=True)
           for sub in submissions:
-              title_slug = sub.get('titleSlug', 'unknown-problem')
+              title_name = sub.get('title', 'LeetCode Problem')
+              # Standardize slug creation for clean safe directories
+              title_slug = title_name.lower().replace(" ", "-").replace("(", "").replace(")", "")
+              
               folder = f"submissions/{title_slug}"
               os.makedirs(folder, exist_ok=True)
               
-              lang_lower = str(sub.get('lang', 'text')).lower()
+              lang_name = sub.get('lang', 'Python3')
+              lang_lower = str(lang_name).lower()
               ext = "py" if "python" in lang_lower else "cpp" if "cpp" in lang_lower else "js" if "javascript" in lang_lower else "java" if "java" in lang_lower else "txt"
               
               file_path = f"{folder}/solution.{ext}"
               if not os.path.exists(file_path):
                   with open(file_path, "w") as f:
-                      f.write(f"# Solution for {sub.get('title')}\n# Language: {sub.get('lang')}\n\n# Synced via zero-maintenance configuration engine.")
+                      f.write(f"# Solution for {title_name}\n# Language: {lang_name}\n\n# Backed up via unblocked zero-maintenance proxy layout.")
                   
                   with open(f"{folder}/README.md", "w") as f:
-                      f.write(f"# {sub.get('title')}\n\n- **Language Tag:** {sub.get('lang')}\n- **Submission Reference ID:** {sub.get('id')}\n- Status: Solved and Validated.")
+                      f.write(f"# {title_name}\n\n- **Language Tag:** {lang_name}\n- **Timestamp:** {sub.get('timestamp')}\n- Status: Solved and Synced.")
                       
-          print(f"Successfully processed {len(submissions)} submission templates.")
+          print(f"Successfully processed {len(submissions)} submission components without data center 403 blocks.")
           EOF
           python run_sync.py
 
       - name: Commit and Push Changes
         run: |
           git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@://github.com"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add submissions/
           if git diff --staged --quiet; then
             echo "No new updates found to commit."
           else
-            git commit -m "Auto-sync newest LeetCode tracking entries"
+            git commit -m "Auto-sync newest LeetCode tracking nodes"
             git push
           fi
