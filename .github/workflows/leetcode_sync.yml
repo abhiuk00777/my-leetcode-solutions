@@ -6,22 +6,25 @@ on:
   workflow_dispatch:     # Manual run: Allows you to trigger it anytime with one click
 
 jobs:
-  build:
+  # JOB 1: Pull down fresh cookies and save them to your encrypted repo vault
+  refresh_cookies:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Step A: Logs in automatically via a headless runner to fetch fresh cookies
       - name: Fetch Fresh LeetCode Cookies
-        uses: vishrutkmr7/UpdateLCCookies@v1.0.0
+        uses: vishrutkmr7/UpdateLCCookies@master  # Uses main branch reference to bypass strict tag errors
         with:
           leetcode-email: ${{ secrets.LEETCODE_USERNAME }}
           leetcode-password: ${{ secrets.LEETCODE_PASSWORD }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Step B: Uses those fresh cookies to instantly grab your code and push it
+  # JOB 2: Runs only after JOB 1 finishes, picking up the fresh cookies to download your code
+  sync_submissions:
+    runs-on: ubuntu-latest
+    needs: refresh_cookies # Ensures cookies are saved before syncing starts
+    steps:
       - name: Sync LeetCode Submissions
         uses: joshcai/leetcode-sync@v1.7
         with:
