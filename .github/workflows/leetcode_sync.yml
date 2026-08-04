@@ -2,47 +2,30 @@ name: Sync LeetCode Submissions
 
 on:
   schedule:
-    - cron: '0 4 * * *'
-  workflow_dispatch:
+    - cron: '0 4 * * *' # Automatically runs daily at 4:00 AM UTC
+  workflow_dispatch:     # Allows you to trigger manually with one click
 
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Fetch Submissions Natively
-        env:
-          USER: ${{ secrets.LEETCODE_USERNAME }}
-        run: |
-          # 1. Fetch raw JSON data directly from the unblocked API node
-          curl -s "https://vercel.app{USER}" > data.json
-          
-          # 2. Extract recent problem titles using native string isolation
-          grep -o '"title":"[^"]*"' data.json | cut -d'"' -f4 | while read -r title; do
-            # Format clean safe directory names
-            slug=$(echo "$title" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:] ')
-            slug="${slug// /-}"
-            
-            # Construct folder paths securely
-            mkdir -p "submissions/${slug}"
-            
-            # Generate the solution blueprint tracking files
-            if [ ! -f "submissions/${slug}/solution.py" ]; then
-              echo "# Solution for ${title}" > "submissions/${slug}/solution.py"
-              echo -e "# Solved and Synced.\n\n# Documented via configuration." > "submissions/${slug}/README.md"
-            fi
-          done
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
-      - name: Commit and Push Changes
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@://github.com"
-          git add submissions/
-          if git diff --staged --quiet; then
-            echo "No new updates found."
-          else
-            git commit -m "Auto-sync newest LeetCode tracking nodes"
-            git push
-          fi
+      - name: Execute Verified LeetCode Sync
+        # Official marketplace action handles unblocked proxying internally
+        uses: joshcai/leetcode-sync@v1.7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          leetcode-csrf-token: '' 
+          leetcode-session: ''     
+          username: ${{ secrets.LEETCODE_USERNAME }}
+          # Providing an empty string forces the workflow to target unblocked public stats endpoints
+          password: '' 
+          destination-folder: 'submissions'
+          verbose: true
