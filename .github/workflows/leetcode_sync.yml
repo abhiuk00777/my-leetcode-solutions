@@ -23,124 +23,88 @@ jobs:
       - name: Execute Sync
         env:
           LEETCODE_USERNAME: ${{ secrets.LEETCODE_USERNAME }}
-          LEETCODE_PASSWORD: ${{ secrets.LEETCODE_PASSWORD }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cat << 'EOF' > run_sync.py
           import os
           import requests
           import json
-          import time
 
-          session = requests.Session()
-          
-          # Setup common headers to match standard desktop browsers
-          session.headers.update({
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-              'Accept': '*/*',
-              'Accept-Language': 'en-US,en;q=0.9',
-              'Connection': 'keep-alive'
-          })
-
-          login_url = "https://leetcode.com"
-          
-          # Step 1: Initial GET to capture the initial CSRF Token
-          init_res = session.get(login_url)
-          csrftoken = session.cookies.get('csrftoken', '')
-          
-          if not csrftoken:
-              # Fallback parser if cookie isn't directly exposed on first fetch
-              for cookie in session.cookies:
-                  if cookie.name == 'csrftoken':
-                      csrftoken = cookie.value
-
-          # Step 2: Establish authentication payloads
-          login_data = {
-              'login': os.environ['LEETCODE_USERNAME'],
-              'password': os.environ['LEETCODE_PASSWORD'],
-              'csrfmiddlewaretoken': csrftoken
-          }
-          
-          headers = {
-              'Origin': 'https://leetcode.com',
-              'Referer': login_url,
-              'X-CSRFToken': csrftoken,
-              'X-Requested-With': 'XMLHttpRequest'
-          }
-          
-          # Step 3: API Post execution
-          login_res = session.post(login_url, data=login_data, headers=headers)
-          time.sleep(2) # Prevent rate limiting flags
-          
-          # Verification check
-          is_logged_in = False
-          for cookie in session.cookies:
-              if cookie.name == 'LEETCODE_SESSION':
-                  is_logged_in = True
-                  
-          if not is_logged_in:
-              print(f"Authentication Failed. Status Code: {login_res.status_code}")
-              print("Please double check your LEETCODE_USERNAME and LEETCODE_PASSWORD secrets.")
-              exit(1)
-              
-          print("Successfully Authenticated with LeetCode API.")
-
-          # Step 4: Fetch submission layout data via GraphQL
+          # Target the public GraphQL engine directly (Bypasses Cloudflare login gates)
           graphql_url = "https://leetcode.com"
+          
           query = """
-          query recentAcSubmissions($username: String!, $limit: Int!) {
-            recentAcSubmissionList(username: $username, limit: $limit) {
-              id title titleSlug timestamp lang
+          query userPublicProfile($username: String!) {
+            matchedUser(username: $username) {
+              submitStats {
+                acSubmissionNum {
+                  difficulty
+                  count
+                }
+              }
+            }
+            recentAcSubmissionList(username: $username, limit: 20) {
+              id
+              title
+              titleSlug
+              timestamp
+              lang
             }
           }
           """
-          variables = {
-              "username": os.environ['LEETCODE_USERNAME'], 
-              "limit": 20
+          
+          username = os.environ['LEETCODE_USERNAME']
+          variables = {"username": username}
+          
+          headers = {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+              'Content-Type': 'application/json',
+              'Referer': f'https://leetcode.com/{username}/'
           }
           
-          # Refresh token tracking for graph layer
-          updated_csrf = ""
-          for cookie in session.cookies:
-              if cookie.name == 'csrftoken':
-                  updated_csrf = cookie.value
-
-          gql_headers = {
-              'X-CSRFToken': updated_csrf,
-              'Referer': 'https://leetcode.com',
-              'Content-Type': 'application/json'
-          }
+          print(f"Fetching public profile data for user: {username}")
+          response = requests.post(graphql_url, json={'query': query, 'variables': variables}, headers=headers)
           
-          gql_res = session.post(graphql_url, json={'query': query, 'variables': variables}, headers=gql_headers)
-          
-          try:
-              submissions = gql_res.json().get('data', {}).get('recentAcSubmissionList', [])
-          except Exception as e:
-              print("Failed parsing GraphQL response data.")
-              print(gql_res.text)
+          if response.status_code != 200:
+              print(f"Failed to communicate with LeetCode. Status: {response.status_code}")
               exit(1)
+              
+          data = response.json().get('data', {})
+          if not data or not data.get('recentAcSubmissionList'):
+              print("No recent accepted submissions found or profile is entirely private.")
+              exit(0)
+              
+          submissions = data['recentAcSubmissionList']
           
-          # Step 5: Process files locally into the workspace
+          # Process files locally into the workspace layout
           os.makedirs('submissions', exist_ok=True)
           for sub in submissions:
               folder = f"submissions/{sub['titleSlug']}"
               os.makedirs(folder, exist_ok=True)
               
-              # Generate the solution metadata file
-              with open(f"{folder}/README.md", "w") as f:
-                  f.write(f"# {sub['title']}\n\n- Language: {sub['lang']}\n- Synced via automated config workflow.")
+              # Map language names to file extensions
+              lang_lower = sub['lang'].lower()
+              ext = "py" if "python" in lang_lower else "cpp" if "cpp" in lang_lower else "js" if "javascript" in lang_lower else "java" if "java" in lang_lower else "txt"
+              
+              # Generate the tracking blueprint
+              file_path = f"{folder}/solution.{ext}"
+              if not os.path.exists(file_path):
+                  with open(file_path, "w") as f:
+                      f.write(f"# Solution for {sub['title']}\n# Language: {sub['lang']}\n\n# Synced via automated cloud config.")
                   
-          print(f"Successfully processed {len(submissions)} submission records.")
+                  with open(f"{folder}/README.md", "w") as f:
+                      f.write(f"# {sub['title']}\n\n- **Language:** {sub['lang']}\n- **Submission ID:** {sub['id']}")
+                      
+          print(f"Successfully tracked {len(submissions)} recent public items.")
           EOF
           python run_sync.py
 
       - name: Commit and Push Changes
         run: |
           git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@://github.com"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add submissions/
           if git diff --staged --quiet; then
-            echo "No new submissions found."
+            echo "No new submissions to push."
           else
             git commit -m "Auto-sync newest LeetCode solutions"
             git push
