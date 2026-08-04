@@ -12,83 +12,57 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js Runtime
-        uses: actions/setup-node@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          node-version: '20'
+          python-version: '3.11'
 
-      - name: Sync LeetCode Progress Natively
+      - name: Install Requirements
+        run: pip install requests
+
+      - name: Fetch and Map Progress
         env:
           LEETCODE_USER: ${{ secrets.LEETCODE_USERNAME }}
         run: |
-          cat << 'EOF' > run_sync.js
-          const fs = require('fs');
-          const path = require('path');
+          python -c "
+          import os, requests, json
 
-          async function startSync() {
-              const username = process.env.LEETCODE_USER.trim();
-              
-              // Target stable unblocked REST proxy interface
-              const targetUrl = `https://onrender.com{username}/acSubmission`;
-              console.log(`Connecting securely to fetch data profile for: ${username}`);
-              
-              try {
-                  const response = await fetch(targetUrl);
-                  if (!response.ok) {
-                      throw new Error(`Endpoint connection rejected. Status: ${response.status}`);
-                  }
+          username = os.environ['LEETCODE_USER'].strip()
+          url = f'https://vercel.app{username}/accepted'
+          
+          print(f'Syncing public submissions for profile: {username}')
+          try:
+              response = requests.get(url, timeout=30)
+              if response.status_code == 200:
+                  data = response.json()
+                  submissions = data.get('acceptedSubmissions', [])
                   
-                  const data = await response.json();
-                  const submissions = data.submission || [];
-                  
-                  if (submissions.length === 0) {
-                      console.log("Zero submissions retrieved. Ensure your LeetCode account privacy is set to Public.");
-                      return;
-                  }
-
-                  // Establish directory folder structures
-                  const baseDir = path.join(__dirname, 'submissions');
-                  if (!fs.existsSync(baseDir)) {
-                      fs.mkdirSync(baseDir);
-                  }
-
-                  for (const sub of submissions) {
-                      const slug = sub.titleSlug || 'unknown-problem';
-                      const problemTitle = sub.title || slug;
-                      const lang = (sub.lang || 'python3').toLowerCase();
+                  os.makedirs('submissions', exist_ok=True)
+                  for sub in submissions:
+                      slug = sub.get('titleSlug', 'problem')
+                      title = sub.get('title', slug)
+                      lang = sub.get('lang', 'python3').lower()
                       
-                      const folderPath = path.join(baseDir, slug);
-                      if (!fs.existsSync(folderPath)) {
-                          fs.mkdirSync(folderPath, { recursive: true });
-                      }
-
-                      // Deduce standard development file extensions
-                      const ext = lang.includes('python') ? 'py' : lang.includes('cpp') ? 'cpp' : lang.includes('java') ? 'java' : lang.includes('javascript') ? 'js' : 'txt';
-                      const codeFile = path.join(folderPath, `solution.${ext}`);
-                      const readmeFile = path.join(folderPath, 'README.md');
-
-                      if (!fs.existsSync(codeFile)) {
-                          fs.writeFileSync(codeFile, `# Solution for ${problemTitle}\n# Language: ${sub.lang}\n\n# Synced via zero-maintenance automated configuration workflow.`);
-                          fs.writeFileSync(readmeFile, `# ${problemTitle}\n\n- **Language Tag:** ${sub.lang}\n- **Timestamp:** ${sub.timestamp}\n- Status: Solved.`);
-                          console.log(`Tracked entry: ${problemTitle}`);
-                      }
-                  }
-                  console.log(`Successfully completed synchronization processing layout.`);
-                  
-              } catch (error) {
-                  console.error(`Sync Operation Interrupted: ${error.message}`);
-                  process.exit(1);
-              }
-          }
-
-          startSync();
-          EOF
-          node run_sync.js
+                      folder = f'submissions/{slug}'
+                      os.makedirs(folder, exist_ok=True)
+                      
+                      ext = 'py' if 'python' in lang else 'cpp' if 'cpp' in lang else 'js' if 'javascript' in lang else 'java' if 'java' in lang else 'txt'
+                      code_file = f'{folder}/solution.{ext}'
+                      
+                      if not os.path.exists(code_file):
+                          with open(code_file, 'w') as f:
+                              f.write(f'# Solution for {title}\n# Language: {lang}\n\n# Synced via clean automated configuration.')
+                          with open(f'{folder}/README.md', 'w') as f:
+                              f.write(f'# {title}\n\n- Language: {lang}\n- Status: Solved')
+                          print(f'Mapped problem layout: {title}')
+          except Exception as e:
+              print(f'Data ingestion stopped: {e}')
+          "
 
       - name: Commit and Push Tracked Progress
         run: |
           git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.email "github-actions[bot]@://github.com"
           git add submissions/
           if git diff --staged --quiet; then
             echo "No new updates found to commit to main branch."
