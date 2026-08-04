@@ -30,15 +30,31 @@ jobs:
           import os
           import requests
           import json
+          import time
 
-          # 1. Establish session and authenticate natively
           session = requests.Session()
+          
+          # Setup common headers to match standard desktop browsers
+          session.headers.update({
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Accept': '*/*',
+              'Accept-Language': 'en-US,en;q=0.9',
+              'Connection': 'keep-alive'
+          })
+
           login_url = "https://leetcode.com"
           
-          # Initialize cookies
-          res = session.get(login_url)
+          # Step 1: Initial GET to capture the initial CSRF Token
+          init_res = session.get(login_url)
           csrftoken = session.cookies.get('csrftoken', '')
           
+          if not csrftoken:
+              # Fallback parser if cookie isn't directly exposed on first fetch
+              for cookie in session.cookies:
+                  if cookie.name == 'csrftoken':
+                      csrftoken = cookie.value
+
+          # Step 2: Establish authentication payloads
           login_data = {
               'login': os.environ['LEETCODE_USERNAME'],
               'password': os.environ['LEETCODE_PASSWORD'],
@@ -46,20 +62,30 @@ jobs:
           }
           
           headers = {
+              'Origin': 'https://leetcode.com',
               'Referer': login_url,
-              'X-CSRFToken': csrftoken
+              'X-CSRFToken': csrftoken,
+              'X-Requested-With': 'XMLHttpRequest'
           }
           
-          # Log into LeetCode via API post request
+          # Step 3: API Post execution
           login_res = session.post(login_url, data=login_data, headers=headers)
+          time.sleep(2) # Prevent rate limiting flags
           
-          if not session.cookies.get('LEETCODE_SESSION'):
-              print("Authentication Failed. Check username and password.")
+          # Verification check
+          is_logged_in = False
+          for cookie in session.cookies:
+              if cookie.name == 'LEETCODE_SESSION':
+                  is_logged_in = True
+                  
+          if not is_logged_in:
+              print(f"Authentication Failed. Status Code: {login_res.status_code}")
+              print("Please double check your LEETCODE_USERNAME and LEETCODE_PASSWORD secrets.")
               exit(1)
               
           print("Successfully Authenticated with LeetCode API.")
 
-          # 2. Fetch submissions via GraphQL
+          # Step 4: Fetch submission layout data via GraphQL
           graphql_url = "https://leetcode.com"
           query = """
           query recentAcSubmissions($username: String!, $limit: Int!) {
@@ -68,26 +94,41 @@ jobs:
             }
           }
           """
-          variables = {"username": os.environ['LEETCODE_USERNAME'], "limit": 20}
-          
-          headers = {
-              'X-CSRFToken': session.cookies.get('csrftoken'),
-              'Referer': 'https://leetcode.com'
+          variables = {
+              "username": os.environ['LEETCODE_USERNAME'], 
+              "limit": 20
           }
           
-          gql_res = session.post(graphql_url, json={'query': query, 'variables': variables}, headers=headers)
-          submissions = gql_res.json().get('data', {}).get('recentAcSubmissionList', [])
+          # Refresh token tracking for graph layer
+          updated_csrf = ""
+          for cookie in session.cookies:
+              if cookie.name == 'csrftoken':
+                  updated_csrf = cookie.value
+
+          gql_headers = {
+              'X-CSRFToken': updated_csrf,
+              'Referer': 'https://leetcode.com',
+              'Content-Type': 'application/json'
+          }
           
-          # 3. Create folder and save submissions
+          gql_res = session.post(graphql_url, json={'query': query, 'variables': variables}, headers=gql_headers)
+          
+          try:
+              submissions = gql_res.json().get('data', {}).get('recentAcSubmissionList', [])
+          except Exception as e:
+              print("Failed parsing GraphQL response data.")
+              print(gql_res.text)
+              exit(1)
+          
+          # Step 5: Process files locally into the workspace
           os.makedirs('submissions', exist_ok=True)
           for sub in submissions:
               folder = f"submissions/{sub['titleSlug']}"
               os.makedirs(folder, exist_ok=True)
-              ext = "py" if "python" in sub['lang'].lower() else "cpp" if "cpp" in sub['lang'].lower() else "js"
               
-              # Save details metadata file
+              # Generate the solution metadata file
               with open(f"{folder}/README.md", "w") as f:
-                  f.write(f"# {sub['title']}\nLanguage: {sub['lang']}")
+                  f.write(f"# {sub['title']}\n\n- Language: {sub['lang']}\n- Synced via automated config workflow.")
                   
           print(f"Successfully processed {len(submissions)} submission records.")
           EOF
