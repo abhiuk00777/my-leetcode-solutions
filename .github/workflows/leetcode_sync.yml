@@ -20,7 +20,7 @@ jobs:
       - name: Install Requirements
         run: pip install requests
 
-      - name: Execute Resilient Sync
+      - name: Execute Native GraphQL Sync
         env:
           LEETCODE_USERNAME: ${{ secrets.LEETCODE_USERNAME }}
         run: |
@@ -29,57 +29,73 @@ jobs:
           import requests
           import json
 
-          # Clean string formatting to avoid NameResolution/Concat errors
-          raw_username = os.environ['LEETCODE_USERNAME'].strip()
+          # Sanitize string variables safely
+          username = str(os.environ['LEETCODE_USERNAME']).strip()
           
-          # Use an unblocked alternative mirror proxy designed specifically for open stats queries
-          base_url = "https://alfa-leetcode-api.onrender.com"
-          endpoint_url = f"{base_url}/{raw_username}/acSubmission"
+          # Target LeetCode's canonical GraphQL gateway natively
+          graphql_url = "https://leetcode.com"
           
-          print(f"Connecting to data layer for user profile: {raw_username}")
+          # Request payload structure for recent accepted items
+          query = """
+          query recentAcSubmissions($username: String!, $limit: Int!) {
+            recentAcSubmissionList(username: $username, limit: $limit) {
+              id
+              title
+              titleSlug
+              timestamp
+              lang
+            }
+          }
+          """
+          
+          variables = {"username": username, "limit": 20}
+          
+          # Browser Mimicking Headers to prevent Cloudflare 403 blocks
+          headers = {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+              "Accept": "*/*",
+              "Accept-Language": "en-US,en;q=0.9",
+              "Content-Type": "application/json",
+              "Origin": "https://leetcode.com",
+              "Referer": f"https://leetcode.com{username}/"
+          }
+          
+          print(f"Communicating natively with LeetCode GraphQL engine for profile: {username}")
           
           try:
-              response = requests.get(endpoint_url, timeout=30)
+              response = requests.post(graphql_url, json={'query': query, 'variables': variables}, headers=headers, timeout=20)
               response.raise_for_status()
+              data = response.json()
           except Exception as e:
-              print(f"Primary mirror failed or timed out: {e}")
-              print("Attempting secondary fallback gateway layout...")
-              # Fallback layout mirror endpoint if primary node is busy
-              endpoint_url = f"https://vercel.app{raw_username}"
-              response = requests.get(endpoint_url, timeout=30)
-
-          data = response.json()
-          
-          # Standardize data key mapping checks between API variations
-          submissions = data.get('submission', []) if 'submission' in data else data.get('recentSubmissions', [])
+              print(f"Network Connection Failed: {e}")
+              exit(1)
+              
+          submissions = data.get('data', {}).get('recentAcSubmissionList', [])
           
           if not submissions:
-              print("No recent accepted submission nodes detected. Ensure your LeetCode profile 'Recent Submissions' card toggle is set to Public.")
+              print("Warning: No accepted submissions found.")
+              print("Action required: Open your LeetCode profile settings -> 'Privacy' -> Ensure 'Recent Submissions' is checked PUBLIC.")
               exit(0)
               
-          # Construct local directories dynamically
+          # Synchronize structural tracking directories inside workspace
           os.makedirs('submissions', exist_ok=True)
           for sub in submissions:
-              title_slug = sub.get('titleSlug') or sub.get('title_slug', 'problem-node')
-              title_name = sub.get('title', 'LeetCode Problem')
-              lang_name = sub.get('lang', 'python3')
-              timestamp = sub.get('timestamp', 'N/A')
-              
+              title_slug = sub.get('titleSlug', 'problem-node')
               folder = f"submissions/{title_slug}"
               os.makedirs(folder, exist_ok=True)
               
-              lang_lower = str(lang_name).lower()
+              lang_lower = str(sub.get('lang', 'text')).lower()
               ext = "py" if "python" in lang_lower else "cpp" if "cpp" in lang_lower else "js" if "javascript" in lang_lower else "java" if "java" in lang_lower else "txt"
               
               file_path = f"{folder}/solution.{ext}"
               if not os.path.exists(file_path):
                   with open(file_path, "w") as f:
-                      f.write(f"# Solution for {title_name}\n# Language: {lang_name}\n\n# Synced safely via unblocked proxy layout.")
+                      f.write(f"# Solution for {sub.get('title')}\n# Language: {sub.get('lang')}\n\n# Backed up via zero-maintenance configuration engine.")
                   
                   with open(f"{folder}/README.md", "w") as f:
-                      f.write(f"# {title_name}\n\n- **Language:** {lang_name}\n- **Timestamp/Unix:** {timestamp}\n- Automated configuration backup tracker.")
+                      f.write(f"# {sub.get('title')}\n\n- **Language Tag:** {sub.get('lang')}\n- **Submission Reference:** {sub.get('id')}\n- Status: Solved")
                       
-          print(f"Successfully tracking {len(submissions)} submission items without host errors.")
+          print(f"Successfully processed {len(submissions)} submission templates.")
           EOF
           python run_sync.py
 
@@ -89,8 +105,8 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add submissions/
           if git diff --staged --quiet; then
-            echo "No new submissions to commit to main branch."
+            echo "No new changes detected."
           else
-            git commit -m "Auto-sync newest LeetCode solutions via mirror layout bypass"
+            git commit -m "Auto-sync newest LeetCode tracking folders"
             git push
           fi
