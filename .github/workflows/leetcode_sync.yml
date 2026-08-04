@@ -29,47 +29,47 @@ jobs:
           import requests
           import json
 
-          username = os.environ['LEETCODE_USERNAME']
+          username = os.environ['LEETCODE_USERNAME'].strip()
           
-          # Connect via an external API aggregator proxy to avoid GitHub Action Cloudflare blocking
+          # Clean, structural API route endpoint targeting the dedicated proxy
           proxy_url = f"https://onrender.com{username}/acSubmission"
           
           print(f"Fetching connection layer via proxy for user: {username}")
           try:
-              response = requests.get(proxy_url, timeout=15)
+              response = requests.get(proxy_url, timeout=30)
           except Exception as e:
-              print(f"Connection timed out or proxy is busy: {e}")
+              print(f"Connection error or endpoint timeout: {e}")
               exit(1)
           
           if response.status_code != 200:
               print(f"Proxy bridge rejected request. Status: {response.status_code}")
+              print(f"Response details: {response.text}")
               exit(1)
               
           data = response.json()
           submissions = data.get('submission', [])
           
           if not submissions:
-              print("No recent accepted submissions found. Ensure your profile submission tracking visibility is set to public.")
+              print("No recent accepted submissions found or tracking profile is private.")
               exit(0)
               
           # Process files locally into workspace layout structures
           os.makedirs('submissions', exist_ok=True)
           for sub in submissions:
-              # Create consistent directory naming conventions using slug values
-              title_slug = sub['titleSlug']
+              title_slug = sub.get('titleSlug', 'unknown-problem')
               folder = f"submissions/{title_slug}"
               os.makedirs(folder, exist_ok=True)
               
-              lang_lower = sub['lang'].lower()
+              lang_lower = sub.get('lang', 'text').lower()
               ext = "py" if "python" in lang_lower else "cpp" if "cpp" in lang_lower else "js" if "javascript" in lang_lower else "java" if "java" in lang_lower else "txt"
               
               file_path = f"{folder}/solution.{ext}"
               if not os.path.exists(file_path):
                   with open(file_path, "w") as f:
-                      f.write(f"# Solution for {sub['title']}\n# Language: {sub['lang']}\n\n# Synced via proxy configuration bypass.")
+                      f.write(f"# Solution for {sub.get('title')}\n# Language: {sub.get('lang')}\n\n# Synced via proxy configuration bypass.")
                   
                   with open(f"{folder}/README.md", "w") as f:
-                      f.write(f"# {sub['title']}\n\n- **Language:** {sub['lang']}\n- **Timestamp:** {sub['timestamp']}")
+                      f.write(f"# {sub.get('title')}\n\n- **Language:** {sub.get('lang')}\n- **Timestamp:** {sub.get('timestamp')}")
                       
           print(f"Successfully cataloged {len(submissions)} submission records without 403 blocks.")
           EOF
@@ -78,7 +78,7 @@ jobs:
       - name: Commit and Push Changes
         run: |
           git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.email "github-actions[bot]@://github.com"
           git add submissions/
           if git diff --staged --quiet; then
             echo "No new submissions to commit."
