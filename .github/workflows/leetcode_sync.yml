@@ -10,12 +10,24 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Fetch and Sync Submissions
-        uses: joshcai/leetcode-sync@v1.7.0
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Step A: Logs in automatically via a headless runner to fetch fresh cookies
+      - name: Fetch Fresh LeetCode Cookies
+        uses: vishrutkmr7/UpdateLCCookies@v1.1
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          leetcode-csrf-token: '' # Leave blank; handled by automatic login
-          leetcode-session: ''     # Leave blank; handled by automatic login
           username: ${{ secrets.LEETCODE_USERNAME }}
           password: ${{ secrets.LEETCODE_PASSWORD }}
+          repository: ${{ github.repository }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Step B: Uses those fresh cookies to instantly grab your code and push it
+      - name: Sync LeetCode Submissions
+        uses: joshcai/leetcode-sync@v1.7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          leetcode-csrf-token: ${{ secrets.LEETCODE_CSRF_TOKEN }}
+          leetcode-session: ${{ secrets.LEETCODE_SESSION }}
           destination-folder: 'submissions'
+          verbose: true
