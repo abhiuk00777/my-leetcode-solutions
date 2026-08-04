@@ -6,30 +6,101 @@ on:
   workflow_dispatch:     # Manual run: Allows you to trigger it anytime with one click
 
 jobs:
-  # JOB 1: Pull down fresh cookies and save them to your encrypted repo vault
-  refresh_cookies:
+  sync:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Fetch Fresh LeetCode Cookies
-        uses: vishrutkmr7/UpdateLCCookies@master  # Uses main branch reference to bypass strict tag errors
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          leetcode-email: ${{ secrets.LEETCODE_USERNAME }}
-          leetcode-password: ${{ secrets.LEETCODE_PASSWORD }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          python-version: '3.11'
 
-  # JOB 2: Runs only after JOB 1 finishes, picking up the fresh cookies to download your code
-  sync_submissions:
-    runs-on: ubuntu-latest
-    needs: refresh_cookies # Ensures cookies are saved before syncing starts
-    steps:
-      - name: Sync LeetCode Submissions
-        uses: joshcai/leetcode-sync@v1.7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          leetcode-csrf-token: ${{ secrets.LEETCODE_CSRF_TOKEN }}
-          leetcode-session: ${{ secrets.LEETCODE_SESSION }}
-          destination-folder: 'submissions'
-          verbose: true
+      - name: Install Requirements
+        run: pip install requests
+
+      - name: Execute Sync
+        env:
+          LEETCODE_USERNAME: ${{ secrets.LEETCODE_USERNAME }}
+          LEETCODE_PASSWORD: ${{ secrets.LEETCODE_PASSWORD }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cat << 'EOF' > run_sync.py
+          import os
+          import requests
+          import json
+
+          # 1. Establish session and authenticate natively
+          session = requests.Session()
+          login_url = "https://leetcode.com"
+          
+          # Initialize cookies
+          res = session.get(login_url)
+          csrftoken = session.cookies.get('csrftoken', '')
+          
+          login_data = {
+              'login': os.environ['LEETCODE_USERNAME'],
+              'password': os.environ['LEETCODE_PASSWORD'],
+              'csrfmiddlewaretoken': csrftoken
+          }
+          
+          headers = {
+              'Referer': login_url,
+              'X-CSRFToken': csrftoken
+          }
+          
+          # Log into LeetCode via API post request
+          login_res = session.post(login_url, data=login_data, headers=headers)
+          
+          if not session.cookies.get('LEETCODE_SESSION'):
+              print("Authentication Failed. Check username and password.")
+              exit(1)
+              
+          print("Successfully Authenticated with LeetCode API.")
+
+          # 2. Fetch submissions via GraphQL
+          graphql_url = "https://leetcode.com"
+          query = """
+          query recentAcSubmissions($username: String!, $limit: Int!) {
+            recentAcSubmissionList(username: $username, limit: $limit) {
+              id title titleSlug timestamp lang
+            }
+          }
+          """
+          variables = {"username": os.environ['LEETCODE_USERNAME'], "limit": 20}
+          
+          headers = {
+              'X-CSRFToken': session.cookies.get('csrftoken'),
+              'Referer': 'https://leetcode.com'
+          }
+          
+          gql_res = session.post(graphql_url, json={'query': query, 'variables': variables}, headers=headers)
+          submissions = gql_res.json().get('data', {}).get('recentAcSubmissionList', [])
+          
+          # 3. Create folder and save submissions
+          os.makedirs('submissions', exist_ok=True)
+          for sub in submissions:
+              folder = f"submissions/{sub['titleSlug']}"
+              os.makedirs(folder, exist_ok=True)
+              ext = "py" if "python" in sub['lang'].lower() else "cpp" if "cpp" in sub['lang'].lower() else "js"
+              
+              # Save details metadata file
+              with open(f"{folder}/README.md", "w") as f:
+                  f.write(f"# {sub['title']}\nLanguage: {sub['lang']}")
+                  
+          print(f"Successfully processed {len(submissions)} submission records.")
+          EOF
+          python run_sync.py
+
+      - name: Commit and Push Changes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@://github.com"
+          git add submissions/
+          if git diff --staged --quiet; then
+            echo "No new submissions found."
+          else
+            git commit -m "Auto-sync newest LeetCode solutions"
+            git push
+          fi
