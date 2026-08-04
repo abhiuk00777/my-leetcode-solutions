@@ -61,12 +61,19 @@ jobs:
 
       - name: Commit and Push Tracked Progress
         run: |
+        
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@://github.com"
-          git add submissions/
-          if git diff --staged --quiet; then
-            echo "No new updates found to commit to main branch."
+          
+          # Check if the submissions folder exists before running git add
+          if [ -d "submissions" ]; then
+            git add submissions/
+            if git diff --staged --quiet; then
+              echo "No new updates found to commit to main branch."
+            else
+              git commit -m "Auto-sync newest LeetCode solutions via configuration"
+              git push
+            fi
           else
-            git commit -m "Auto-sync newest LeetCode solutions via configuration"
-            git push
+            echo "No submissions found to sync. Ensure your LeetCode Privacy settings for Recent Submissions are set to Public!"
           fi
