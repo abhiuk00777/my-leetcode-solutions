@@ -2,8 +2,8 @@ name: Sync LeetCode Submissions
 
 on:
   schedule:
-    - cron: '0 4 * * *' # Automated run: Executes every day at 4:00 AM UTC
-  workflow_dispatch:     # Manual run: Allows you to trigger it anytime with one click
+    - cron: '0 4 * * *'
+  workflow_dispatch:
 
 jobs:
   sync:
@@ -12,79 +12,36 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install Requirements
-        run: pip install requests
-
-      - name: Fetch Submissions via External Unblocked Node
+      - name: Fetch Submissions Natively
         env:
-          LEETCODE_USERNAME: ${{ secrets.LEETCODE_USERNAME }}
+          USER: ${{ secrets.LEETCODE_USERNAME }}
         run: |
-          cat << 'EOF' > run_sync.py
-          import os
-          import requests
-          import json
-
-          username = str(os.environ['LEETCODE_USERNAME']).strip()
+          # 1. Fetch raw JSON data directly from the unblocked API node
+          curl -s "https://vercel.app{USER}" > data.json
           
-          # This is an unblocked public gateway node that manages Cloudflare-free LeetCode data feeds
-          api_url = f"https://vercel.app{username}"
-          
-          print(f"Retrieving unblocked tracking data metrics for user profile: {username}")
-          
-          try:
-              response = requests.get(api_url, timeout=30)
-              response.raise_for_status()
-              data = response.json()
-          except Exception as e:
-              print(f"Network processing mirror error: {e}")
-              exit(1)
-              
-          # Parse recent accepted updates safely 
-          submissions = data.get('recentSubmissions', [])
-          
-          if not submissions:
-              print("No accepted submissions retrieved.")
-              print("Fix: Ensure your LeetCode profile settings -> Privacy -> 'Recent Submissions' is checked PUBLIC.")
-              exit(0)
-              
-          # Construct directories inside git repo tree structure workspace
-          os.makedirs('submissions', exist_ok=True)
-          for sub in submissions:
-              title_name = sub.get('title', 'LeetCode Problem')
-              # Standardize slug creation for clean safe directories
-              title_slug = title_name.lower().replace(" ", "-").replace("(", "").replace(")", "")
-              
-              folder = f"submissions/{title_slug}"
-              os.makedirs(folder, exist_ok=True)
-              
-              lang_name = sub.get('lang', 'Python3')
-              lang_lower = str(lang_name).lower()
-              ext = "py" if "python" in lang_lower else "cpp" if "cpp" in lang_lower else "js" if "javascript" in lang_lower else "java" if "java" in lang_lower else "txt"
-              
-              file_path = f"{folder}/solution.{ext}"
-              if not os.path.exists(file_path):
-                  with open(file_path, "w") as f:
-                      f.write(f"# Solution for {title_name}\n# Language: {lang_name}\n\n# Backed up via unblocked zero-maintenance proxy layout.")
-                  
-                  with open(f"{folder}/README.md", "w") as f:
-                      f.write(f"# {title_name}\n\n- **Language Tag:** {lang_name}\n- **Timestamp:** {sub.get('timestamp')}\n- Status: Solved and Synced.")
-                      
-          print(f"Successfully processed {len(submissions)} submission components without data center 403 blocks.")
-          EOF
-          python run_sync.py
+          # 2. Extract recent problem titles using native string isolation
+          grep -o '"title":"[^"]*"' data.json | cut -d'"' -f4 | while read -r title; do
+            # Format clean safe directory names
+            slug=$(echo "$title" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:] ')
+            slug="${slug// /-}"
+            
+            # Construct folder paths securely
+            mkdir -p "submissions/${slug}"
+            
+            # Generate the solution blueprint tracking files
+            if [ ! -f "submissions/${slug}/solution.py" ]; then
+              echo "# Solution for ${title}" > "submissions/${slug}/solution.py"
+              echo -e "# Solved and Synced.\n\n# Documented via configuration." > "submissions/${slug}/README.md"
+            fi
+          done
 
       - name: Commit and Push Changes
         run: |
           git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.email "github-actions[bot]@://github.com"
           git add submissions/
           if git diff --staged --quiet; then
-            echo "No new updates found to commit."
+            echo "No new updates found."
           else
             git commit -m "Auto-sync newest LeetCode tracking nodes"
             git push
