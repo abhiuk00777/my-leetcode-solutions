@@ -20,7 +20,7 @@ jobs:
       - name: Install Requirements
         run: pip install requests
 
-      - name: Execute Sync
+      - name: Execute Proxy Sync
         env:
           LEETCODE_USERNAME: ${{ secrets.LEETCODE_USERNAME }}
         run: |
@@ -29,72 +29,49 @@ jobs:
           import requests
           import json
 
-          # Target the public GraphQL engine directly (Bypasses Cloudflare login gates)
-          graphql_url = "https://leetcode.com"
-          
-          query = """
-          query userPublicProfile($username: String!) {
-            matchedUser(username: $username) {
-              submitStats {
-                acSubmissionNum {
-                  difficulty
-                  count
-                }
-              }
-            }
-            recentAcSubmissionList(username: $username, limit: 20) {
-              id
-              title
-              titleSlug
-              timestamp
-              lang
-            }
-          }
-          """
-          
           username = os.environ['LEETCODE_USERNAME']
-          variables = {"username": username}
           
-          headers = {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-              'Content-Type': 'application/json',
-              'Referer': f'https://leetcode.com/{username}/'
-          }
+          # Connect via an external API aggregator proxy to avoid GitHub Action Cloudflare blocking
+          proxy_url = f"https://onrender.com{username}/acSubmission"
           
-          print(f"Fetching public profile data for user: {username}")
-          response = requests.post(graphql_url, json={'query': query, 'variables': variables}, headers=headers)
+          print(f"Fetching connection layer via proxy for user: {username}")
+          try:
+              response = requests.get(proxy_url, timeout=15)
+          except Exception as e:
+              print(f"Connection timed out or proxy is busy: {e}")
+              exit(1)
           
           if response.status_code != 200:
-              print(f"Failed to communicate with LeetCode. Status: {response.status_code}")
+              print(f"Proxy bridge rejected request. Status: {response.status_code}")
               exit(1)
               
-          data = response.json().get('data', {})
-          if not data or not data.get('recentAcSubmissionList'):
-              print("No recent accepted submissions found or profile is entirely private.")
+          data = response.json()
+          submissions = data.get('submission', [])
+          
+          if not submissions:
+              print("No recent accepted submissions found. Ensure your profile submission tracking visibility is set to public.")
               exit(0)
               
-          submissions = data['recentAcSubmissionList']
-          
-          # Process files locally into the workspace layout
+          # Process files locally into workspace layout structures
           os.makedirs('submissions', exist_ok=True)
           for sub in submissions:
-              folder = f"submissions/{sub['titleSlug']}"
+              # Create consistent directory naming conventions using slug values
+              title_slug = sub['titleSlug']
+              folder = f"submissions/{title_slug}"
               os.makedirs(folder, exist_ok=True)
               
-              # Map language names to file extensions
               lang_lower = sub['lang'].lower()
               ext = "py" if "python" in lang_lower else "cpp" if "cpp" in lang_lower else "js" if "javascript" in lang_lower else "java" if "java" in lang_lower else "txt"
               
-              # Generate the tracking blueprint
               file_path = f"{folder}/solution.{ext}"
               if not os.path.exists(file_path):
                   with open(file_path, "w") as f:
-                      f.write(f"# Solution for {sub['title']}\n# Language: {sub['lang']}\n\n# Synced via automated cloud config.")
+                      f.write(f"# Solution for {sub['title']}\n# Language: {sub['lang']}\n\n# Synced via proxy configuration bypass.")
                   
                   with open(f"{folder}/README.md", "w") as f:
-                      f.write(f"# {sub['title']}\n\n- **Language:** {sub['lang']}\n- **Submission ID:** {sub['id']}")
+                      f.write(f"# {sub['title']}\n\n- **Language:** {sub['lang']}\n- **Timestamp:** {sub['timestamp']}")
                       
-          print(f"Successfully tracked {len(submissions)} recent public items.")
+          print(f"Successfully cataloged {len(submissions)} submission records without 403 blocks.")
           EOF
           python run_sync.py
 
@@ -104,8 +81,8 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add submissions/
           if git diff --staged --quiet; then
-            echo "No new submissions to push."
+            echo "No new submissions to commit."
           else
-            git commit -m "Auto-sync newest LeetCode solutions"
+            git commit -m "Auto-sync newest LeetCode solutions via proxy configuration"
             git push
           fi
